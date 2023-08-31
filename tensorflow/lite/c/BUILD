@@ -62,6 +62,16 @@ cc_library_with_tflite_with_c_headers_test(
         "//tensorflow/lite/core/c:c_api",
     ],
 )
+cc_library(
+    name = "Mudra",
+    srcs = ["TensorflowInference.cc", "TensorflowInference.h", "Logging.cpp", "Logging.h", "CommonTypes.h", "Constants.h"],
+    copts = tflite_copts(),
+    linkstatic = 1,
+    deps = [
+       "//tensorflow/lite:framework",
+       "//tensorflow/lite/kernels:builtin_ops",
+      ],
+)
 
 tflite_cc_library_with_c_headers_test(
     name = "c_api_for_testing",
