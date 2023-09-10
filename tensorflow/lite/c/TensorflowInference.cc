@@ -13,6 +13,7 @@
 #include "tensorflow/lite/model.h"
 #include "tensorflow/lite/string_util.h"
 #include "tensorflow/lite/mutable_op_resolver.h"
+#include "tensorflow/lite/delegates/coreml/coreml_delegate.h"
 
 using namespace std;
 
@@ -30,7 +31,9 @@ class ComputationalModel
 	std::unique_ptr<tflite::FlatBufferModel> m_model;
 	std::unique_ptr<tflite::Interpreter> m_interpreter;
 
-	vector<int> m_outputSizes;
+    TfLiteDelegate* m_coreMl_delegate;
+
+    vector<int> m_outputSizes;
 
 public:
 
@@ -38,10 +41,13 @@ public:
 		const char* modelFileName,
 		const vector<vector<int>> & inputDims,
 		int num_threads,
-		int loggerSeverity) :
+		int loggerSeverity,
+        int coreMLVersion) :
 		m_logger(make_shared<Logger>("Mudra", (Logger::Severity)loggerSeverity))
 	{
-		DebugMessage(m_logger) << "\nStart TensorFlow 2.14 init function on " << modelFileName;
+        DebugMessage(m_logger) << "\nStart TensorFlow 2.14 with coreML support init function on " << modelFileName;
+        DebugMessage(m_logger) << "\nnumOfThreads = " << num_threads;
+        DebugMessage(m_logger) << "\ncoreMLVersion = " << coreMLVersion;
 
 		// Load the model
 		m_model = tflite::FlatBufferModel::BuildFromFile(modelFileName);
@@ -62,6 +68,21 @@ public:
 			m_interpreter->SetNumThreads(num_threads);
 		}
 
+        TfLiteCoreMlDelegateOptions coreMlDelegateOptions;
+        
+        if (coreMLVersion >= 1) {
+            coreMlDelegateOptions.coreml_version = coreMLVersion;
+            
+            m_coreMl_delegate = TfLiteCoreMlDelegateCreate(&coreMlDelegateOptions);
+            
+            TfLiteStatus delegate_status = m_interpreter->ModifyGraphWithDelegate(m_coreMl_delegate);
+            if (delegate_status == kTfLiteOk) { 
+                DebugMessage(m_logger) << "\nTensorflow init coreMl successfully";
+            } else {
+                ErrorMessage(m_logger) << "\nTensorflow cant init coreMl, delegate status = " << delegate_status;
+            }
+        }
+        
 		DebugMessage(m_logger) << "\nModel inputs size = " << m_interpreter->inputs().size() << ":";
 		if (inputDims.size() != m_interpreter->inputs().size())
 		{
@@ -87,6 +108,10 @@ public:
 			DebugMessage(m_logger) << ", " << m_outputSizes[i];
 		}
 	}
+    
+    ~ComputationalModel() {
+        TfLiteCoreMlDelegateDelete(m_coreMl_delegate);
+    }
 
 	void Run(const vector<vector<float>>& inputs, std::vector<std::vector<float>>& outputs)
 	{
@@ -126,9 +151,10 @@ void InitTensorflowModel(
 	const char* graphFileName,
 	const vector<vector<int>>& inputDims,
 	int loggerSeverity,
-	int numOfThreads)
+	int numOfThreads,
+    int coreMLVersion)
 {
-	g_model[graphFileName] = make_unique<ComputationalModel>(graphFileName, inputDims, numOfThreads, loggerSeverity);
+    g_model[graphFileName] = make_unique<ComputationalModel>(graphFileName, inputDims, numOfThreads, loggerSeverity, coreMLVersion);
 }
 
 void RunTensorflowModel(

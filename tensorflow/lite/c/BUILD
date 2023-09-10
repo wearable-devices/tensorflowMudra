@@ -64,6 +64,9 @@ cc_library_with_tflite_with_c_headers_test(
 )
 cc_library(
     name = "Mudra",
+    hdrs = [
+        "//tensorflow/lite/delegates/coreml:coreml_delegate.h"
+    ],
     srcs = ["TensorflowInference.cc", "TensorflowInference.h", "Logging.cpp", "Logging.h", "CommonTypes.h", "Constants.h"],
     copts = tflite_copts(),
     linkstatic = 1,

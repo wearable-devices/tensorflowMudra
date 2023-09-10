@@ -202,6 +202,7 @@ cc_library(
         "swift_module=TensorFlowLiteC",
     ],
     deps = [
+        "//tensorflow/lite/delegates/coreml:coreml_delegate",
         "//tensorflow/lite/c:Mudra",
     ],
 )

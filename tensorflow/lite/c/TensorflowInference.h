@@ -14,7 +14,8 @@ extern "C" void InitTensorflowModel(
 	const char* graphFileName,
 	const vector<vector<int>> & inputDims,
 	int loggerSeverity,
-	int numOfThreads);
+	int numOfThreads,
+    int coreMLVersion); 
         
 extern "C" void RunTensorflowModel(
 	const char* graphFileName,
