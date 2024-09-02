@@ -14,6 +14,7 @@
 #include "tensorflow/lite/string_util.h"
 #include "tensorflow/lite/mutable_op_resolver.h"
 #include "tensorflow/lite/delegates/coreml/coreml_delegate.h"
+//#include "tensorflow/lite/delegates/flex/delegate.h"
 
 using namespace std;
 
@@ -35,6 +36,84 @@ class ComputationalModel
 
     vector<int> m_outputSizes;
 
+    void InitInterpreter(const char* modelFileName, int num_threads) {
+        // Load the model
+        m_model = tflite::FlatBufferModel::BuildFromFile(modelFileName);
+
+        if (!m_model) {
+            ErrorMessage(m_logger) << "\nCould not create TensorFlow Graph: " << modelFileName;
+        }
+        else
+        {
+            DebugMessage(m_logger) << "\nGraph " << modelFileName << " read successfully! ";
+        }
+
+        // Build the interpreter
+        tflite::ops::builtin::BuiltinOpResolver resolver;
+        tflite::InterpreterBuilder(*m_model, resolver)(&m_interpreter);
+
+        if (!m_interpreter) {
+            // Handle the error
+            ErrorMessage(m_logger) << "\nCould not build interpreter";
+            return;
+        } else {
+            DebugMessage(m_logger) << "\nBuilt interpreter successfully! ";
+        }
+        
+        if (num_threads != 1) {
+            m_interpreter->SetNumThreads(num_threads);
+        }
+    }
+
+    void InitCoreMlDelegate(int coreMLVersion) {
+        TfLiteCoreMlDelegateOptions coreMlDelegateOptions;
+        
+        if (coreMLVersion >= 1) {
+            coreMlDelegateOptions.coreml_version = coreMLVersion;
+            
+            m_coreMl_delegate = TfLiteCoreMlDelegateCreate(&coreMlDelegateOptions);
+            
+            TfLiteStatus delegate_status = m_interpreter->ModifyGraphWithDelegate(m_coreMl_delegate);
+            if (delegate_status == kTfLiteOk) {
+                DebugMessage(m_logger) << "\nTensorflow init coreMl successfully";
+            } else {
+                ErrorMessage(m_logger) << "\nTensorflow cant init coreMl, delegate status = " << delegate_status;
+            }
+        }
+    }
+
+/*    void InitFlexDelegate() {
+        // Add Flex delegate for TF ops (necessary for custom ops often used in training)
+        auto* delegate = TfLiteFlexDelegateCreate();
+        TfLiteStatus delegate_status = interpreter->ModifyGraphWithDelegate(delegate);
+        if (delegate_status == kTfLiteOk) {
+            DebugMessage(m_logger) << "\nTensorflow add Flex delegate successfully";
+        } else {
+            ErrorMessage(m_logger) << "\nTensorflow add Flex delegate failed, delegate status = " << delegate_status;
+        }
+    } */
+
+    void InitInputs(const vector<vector<int>> & inputDims) {
+        DebugMessage(m_logger) << "\nModel inputs size = " << m_interpreter->inputs().size() << ":";
+        if (inputDims.size() != m_interpreter->inputs().size()) {
+            ErrorMessage(m_logger) << "\nWrong dims sizes";
+        }
+
+        for (unsigned i = 0; i < m_interpreter->inputs().size(); i++)  {
+            int size = m_interpreter->tensor(m_interpreter->inputs()[i])->bytes / sizeof(float);
+            DebugMessage(m_logger) << ", " << size;
+
+            m_interpreter->ResizeInputTensor(m_interpreter->inputs()[i], inputDims[i]);
+        }
+    }
+    
+    void AllocateTensors() {
+        if (m_interpreter->AllocateTensors() != kTfLiteOk) ErrorMessage(m_logger) << "\nAllocateTensors failed";
+        else DebugMessage(m_logger) << "\nAllocateTensors succeeded";
+    }
+
+    
+
 public:
 
 	ComputationalModel(
@@ -49,56 +128,10 @@ public:
         DebugMessage(m_logger) << "\nnumOfThreads = " << num_threads;
         DebugMessage(m_logger) << "\ncoreMLVersion = " << coreMLVersion;
 
-		// Load the model
-		m_model = tflite::FlatBufferModel::BuildFromFile(modelFileName);
-
-		if (!m_model) {
-			ErrorMessage(m_logger) << "\nCould not create TensorFlow Graph: " << modelFileName;
-		}
-		else
-		{
-			DebugMessage(m_logger) << "\nGraph " << modelFileName << " read successfully! ";
-		}
-
-		// Build the interpreter
-		tflite::ops::builtin::BuiltinOpResolver resolver;
-		tflite::InterpreterBuilder(*m_model, resolver)(&m_interpreter);
-
-		if (num_threads != 1) {
-			m_interpreter->SetNumThreads(num_threads);
-		}
-
-        TfLiteCoreMlDelegateOptions coreMlDelegateOptions;
-        
-        if (coreMLVersion >= 1) {
-            coreMlDelegateOptions.coreml_version = coreMLVersion;
-            
-            m_coreMl_delegate = TfLiteCoreMlDelegateCreate(&coreMlDelegateOptions);
-            
-            TfLiteStatus delegate_status = m_interpreter->ModifyGraphWithDelegate(m_coreMl_delegate);
-            if (delegate_status == kTfLiteOk) { 
-                DebugMessage(m_logger) << "\nTensorflow init coreMl successfully";
-            } else {
-                ErrorMessage(m_logger) << "\nTensorflow cant init coreMl, delegate status = " << delegate_status;
-            }
-        }
-        
-		DebugMessage(m_logger) << "\nModel inputs size = " << m_interpreter->inputs().size() << ":";
-		if (inputDims.size() != m_interpreter->inputs().size())
-		{
-			ErrorMessage(m_logger) << "\nWrong dims sizes";
-		}
-
-		for (unsigned i = 0; i < m_interpreter->inputs().size(); i++)
-		{
-			int size = m_interpreter->tensor(m_interpreter->inputs()[i])->bytes / sizeof(float);
-			DebugMessage(m_logger) << ", " << size;
-
-			m_interpreter->ResizeInputTensor(m_interpreter->inputs()[i], inputDims[i]);
-		}
-
-		if (m_interpreter->AllocateTensors() != kTfLiteOk) ErrorMessage(m_logger) << "\nAllocateTensors failed";
-		else DebugMessage(m_logger) << "\nAllocateTensors succeeded";
+        InitInterpreter(modelFileName, num_threads);
+        InitCoreMlDelegate(coreMLVersion);
+        InitInputs(inputDims);
+        AllocateTensors();
 
 		m_outputSizes.resize(m_interpreter->outputs().size());
 		DebugMessage(m_logger) << "\nModel outputSizes " << m_interpreter->outputs().size() << ":";
@@ -108,6 +141,60 @@ public:
 			DebugMessage(m_logger) << ", " << m_outputSizes[i];
 		}
 	}
+    
+    ComputationalModel(
+        const char* modelFileName,
+        const char* weightsFileName,
+        int num_threads,
+        int loggerSeverity) :
+        m_logger(make_shared<Logger>("Mudra", (Logger::Severity)loggerSeverity))
+    {
+        DebugMessage(m_logger) << "\nStart TensorFlow 2.16 with on device training support init function on " << modelFileName << ", weights file : " << weightsFileName;
+        DebugMessage(m_logger) << "\nnumOfThreads = " << num_threads;
+
+        InitInterpreter(modelFileName, num_threads);
+//        InitFlexDelegate();
+        AllocateTensors();
+
+        // Get the signature runner for "restore"
+        auto* runner = m_interpreter->GetSignatureRunner("restore");
+        if (!runner) {
+            ErrorMessage(m_logger) << "Failed to get signature runner for 'restore'" << std::endl;
+            return ;
+        } else {
+            DebugMessage(m_logger) << "Get signature runner for 'restore' succeeded" << std::endl;
+        }
+        
+        // Set the input for the "restore" signature
+        // Assuming the input tensor for the checkpoint path is named "checkpoint_path"
+        TfLiteTensor* input_tensor = runner->input_tensor("checkpoint_path");
+        if (!input_tensor) {
+            ErrorMessage(m_logger) <<  "Failed to get input tensor" << std::endl;
+            return;
+        } else {
+            DebugMessage(m_logger) << "Get input tensor succeeded" << std::endl;
+        }
+        
+        // Set the checkpoint path
+        if (input_tensor->type == kTfLiteString) {
+            tflite::DynamicBuffer buffer;
+            buffer.AddString(weightsFileName, strlen(weightsFileName));
+            buffer.WriteToTensor(input_tensor, /*new_shape=*/nullptr);
+        } else {
+            ErrorMessage(m_logger) <<  "Unexpected input tensor type for checkpoint path" << std::endl;
+            return;
+        }
+        
+        // After setting the input tensor
+        TfLiteStatus status = runner->Invoke();
+        if (status != kTfLiteOk) {
+            ErrorMessage(m_logger) << "Failed to invoke restore signature runner" << std::endl;
+            return;
+        } else {
+            DebugMessage(m_logger) << "Restore signature runner invoked successfully" << std::endl;
+        }
+
+    }
     
     ~ComputationalModel() {
         TfLiteCoreMlDelegateDelete(m_coreMl_delegate);
@@ -148,24 +235,34 @@ public:
 };
 
 void InitTensorflowModel(
-	const char* graphFileName,
+	const char* modelFileName,
 	const vector<vector<int>>& inputDims,
 	int loggerSeverity,
 	int numOfThreads,
     int coreMLVersion)
 {
-    g_model[graphFileName] = make_unique<ComputationalModel>(graphFileName, inputDims, numOfThreads, loggerSeverity, coreMLVersion);
+    g_model[modelFileName] = make_unique<ComputationalModel>(modelFileName, inputDims, numOfThreads, loggerSeverity, coreMLVersion);
 }
+
+void InitTensorflowTrainingModel(
+    const char* modelFileName,
+    const char* weightsFileName,
+    int loggerSeverity,
+    int numOfThreads)
+{
+    g_model[modelFileName] = make_unique<ComputationalModel>(modelFileName, weightsFileName, numOfThreads, loggerSeverity);
+}
+
+
 
 void RunTensorflowModel(
-	const char* graphFileName,
-	const vector<vector<float>>& inputs,
-	vector<vector<float>>& outputs)
+    const char* graphFileName,
+    const vector<vector<float>>& inputs,
+    vector<vector<float>>& outputs)
 {
-	g_model[graphFileName]->Run(inputs, outputs);
+    g_model[graphFileName]->Run(inputs, outputs);
 }
-
-
+ 
 void DeleteTensorflowModel(const char* graphFileName)
 {
     g_model[graphFileName].reset();

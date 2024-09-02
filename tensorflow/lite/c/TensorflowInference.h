@@ -11,16 +11,22 @@
 #endif
 
 extern "C" void InitTensorflowModel(
-	const char* graphFileName,
-	const vector<vector<int>> & inputDims,
-	int loggerSeverity,
-	int numOfThreads,
-    int coreMLVersion); 
+    const char* graphFileName,
+    const vector<vector<int>> & inputDims,
+    int loggerSeverity,
+    int numOfThreads,
+    int coreMLVersion);
         
 extern "C" void RunTensorflowModel(
-	const char* graphFileName,
-	const vector<vector<float>>& inputs,
-	vector<vector<float>>& outputs);
+    const char* graphFileName,
+    const vector<vector<float>>& inputs,
+    vector<vector<float>>& outputs);
+
+extern "C" void InitTensorflowTrainingModel(
+    const char* modelFileName,
+    const char* weightsFileName,
+    int loggerSeverity,
+    int numOfThreads);
 
 extern "C" void DeleteTensorflowModel(const char* graphFileName);
 
