@@ -2,7 +2,7 @@
 
 #include <vector>
 #include <string>
-
+#include <map> 
 
 #ifdef _WINDOWS
 #include "../Computation/Logging.h"
@@ -25,11 +25,14 @@ extern "C" void RunTensorflowModel(
 extern "C" void InitTensorflowTrainingModel(
     const char* modelFileName,
     const char* weightsFileName,
+    const map<string, vector<int>>& inputDims,
     int loggerSeverity,
     int numOfThreads);
 
 extern "C" void DeleteTensorflowModel(const char* graphFileName);
 
-
+extern "C" void TrainTensorflowModel(
+    const char* modelFileName,
+    const map<string, vector<float>>& inputs);
         
  
