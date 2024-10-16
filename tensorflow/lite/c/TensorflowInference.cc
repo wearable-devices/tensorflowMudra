@@ -33,7 +33,7 @@ class ComputationalModel
 	std::unique_ptr<tflite::Interpreter> m_interpreter;
 
     TfLiteDelegate* m_coreMl_delegate;
-    string m_savedWeightsFileName;
+    string m_WeightsFileName;
     vector<int> m_outputSizes;
 
     void InitInterpreter(const char* modelFileName, int num_threads) {
@@ -186,9 +186,10 @@ public:
     {
         DebugMessage(m_logger) << "\nStart TensorFlow 2.16 with on device training support init function on " << modelFileName << ", weights file : " << weightsFileName;
         DebugMessage(m_logger) << "\nnumOfThreads = " << num_threads;
-        m_savedWeightsFileName = weightsFileName;
+        m_WeightsFileName = weightsFileName;
 
         InitInterpreter(modelFileName, num_threads);
+        Restore();
         tflite::impl::SignatureRunner* runner = GetRunner("train");
         InitRunnerInputsWithLabels(runner, inputDims);
         AllocateTensors();
@@ -257,87 +258,105 @@ public:
 
 		// TODO: Implement SaveWeights function and call it here
 		// SaveWeights(output);
+        // Retrieve and process the output tensor
+        const TfLiteTensor* output_tensor = runner->output_tensor("loss");
+
+        // Assuming the output tensor is of size [4 * dimensions * 1]
+        float* output_data = output_tensor->data.f;
+        int batch_size = 4; // The first dimension
+        int dim = 18; // The second dimension
+        int channels = 1; // The third dimension
+
+        std::vector<std::vector<std::vector<float>>> output(batch_size, std::vector<std::vector<float>>(dim, std::vector<float>(channels)));
+
+        for (int i = 0; i < batch_size; ++i) {
+            for (int j = 0; j < dim; ++j) {
+                output[i][j][0] = output_data[i * dim + j];
+            }
+        }
+
+        // Logging or using the output
+        for (int i = 0; i < batch_size; ++i) {
+            for (int j = 0; j < dim; ++j) {
+                DebugMessage(m_logger) << "output[" << i << "][" << j << "][0]: " << output[i][j][0];
+            }
+        }
+        
+        Save();
 	}
 
     void Save()
     {
-        tflite::impl::SignatureRunner* saver = GetRunner("train");
+        // Get the signature runner for 'save'
+        auto* saver = m_interpreter->GetSignatureRunner("save");
+        if (!saver) {
+            ErrorMessage(m_logger) << "Failed to get signature runner for 'save'" << std::endl;
+            return;
+        }
         
+        if (saver->ResizeInputTensor("checkpoint_path", {1}) != kTfLiteOk) {
+            ErrorMessage(m_logger) << "Failed to resize input tensor for save operation";
+            return;
+        }
+        if (saver->AllocateTensors() != kTfLiteOk) {
+            ErrorMessage(m_logger) << "Failed to allocate tensors for save operation";
+            return;
+        }
+        TfLiteTensor* input_tensor = saver->input_tensor("checkpoint_path");
+        if (!input_tensor) {
+            ErrorMessage(m_logger) << "Failed to get input tensor for save operation";
+            return;
+        }
+        tflite::DynamicBuffer buffer;
+        buffer.AddString(m_WeightsFileName.c_str(), m_WeightsFileName.size());
+        buffer.WriteToTensor(input_tensor, /*new_shape=*/nullptr);
+         
+
+       
+        // Invoke the saver
         if (saver->Invoke() != kTfLiteOk) {
             ErrorMessage(m_logger) << "Failed to invoke save signature runner" << std::endl;
             return;
         }
+        ErrorMessage(m_logger) << "Saved new weights!" << std::endl;
 
-        // Get the output string
-        const TfLiteTensor* output_tensor = saver->output_tensor(0);
-        if (!output_tensor) {
-            ErrorMessage(m_logger) << "Failed to get output tensor from save signature runner" << std::endl;
-            return;
-        }
-
-        // Convert the output tensor to a string
-        std::string saved_model_path(reinterpret_cast<const char*>(output_tensor->data.raw), output_tensor->bytes);
-        
-        DebugMessage(m_logger) << "Model saved to: " << saved_model_path << std::endl;
-
-        // Get the home directory for iOS
-        const char* home_dir = getenv("HOME");
-        if (!home_dir) {
-            ErrorMessage(m_logger) << "Failed to get HOME environment variable" << std::endl;
-            return;
-        }
-
-        // Construct the full path for the .ckpt file
-        std::string full_path = std::string(home_dir) + "/" + m_savedWeightsFileName + ".ckpt";
-
-        // Save the output data to a .ckpt file
-        std::ofstream outFile(full_path, std::ios::binary);
-        if (!outFile) {
-            ErrorMessage(m_logger) << "Failed to open file for writing saved model data: " << full_path << std::endl;
-            return;
-        }
-
-        // Write the size of the data
-        size_t dataSize = output_tensor->bytes;
-        outFile.write(reinterpret_cast<const char*>(&dataSize), sizeof(size_t));
-
-        // Write the actual data
-        outFile.write(reinterpret_cast<const char*>(output_tensor->data.raw), dataSize);
-        if (!outFile) {
-            ErrorMessage(m_logger) << "Failed to write saved model data to file: " << full_path << std::endl;
-        } else {
-            DebugMessage(m_logger) << "Saved model data written to: " << full_path << std::endl;
-        }
-
-        outFile.close();
     }
 
 
     void Restore() {
-        tflite::impl::SignatureRunner* restore = GetRunner("restore");
-        
-        // Get the input tensor for the checkpoint path
-        TfLiteTensor* input_tensor = restore->input_tensor("checkpoint_path");
-        if (!input_tensor) {
-            ErrorMessage(m_logger) << "Failed to get input tensor" << std::endl;
+        auto* restorer = m_interpreter->GetSignatureRunner("restore");
+        if (!restorer) {
+            ErrorMessage(m_logger) << "Failed to get signature runner for 'restore'" << std::endl;
             return;
         }
-
-        // Set the checkpoint path
-        std::string checkpoint_path = m_savedWeightsFileName + ".ckpt";
-        tflite::DynamicBuffer buffer;
-        buffer.AddString(checkpoint_path.c_str(), checkpoint_path.length());
-        buffer.WriteToTensor(input_tensor, /*new_shape=*/nullptr);
-
-        // Invoke the restore operation
-        TfLiteStatus status = restore->Invoke();
-        if (status != kTfLiteOk) {
-            ErrorMessage(m_logger) << "Failed to invoke restore signature runner" << std::endl;
-        } else {
-            DebugMessage(m_logger) << "Weights restored successfully" << std::endl;
+        
+        if (restorer->ResizeInputTensor("checkpoint_path", {1}) != kTfLiteOk) {
+            ErrorMessage(m_logger) << "Failed to resize input tensor for restore operation";
+            return;
         }
+        if (restorer->AllocateTensors() != kTfLiteOk) {
+            ErrorMessage(m_logger) << "Failed to allocate tensors for restore operation";
+            return;
+        }
+        TfLiteTensor* input_tensor = restorer->input_tensor("checkpoint_path");
+        if (!input_tensor) {
+            ErrorMessage(m_logger) << "Failed to get input tensor for restore operation";
+            return;
+        }
+        tflite::DynamicBuffer buffer;
+        buffer.AddString(m_WeightsFileName.c_str(), m_WeightsFileName.size());
+        buffer.WriteToTensor(input_tensor, /*new_shape=*/nullptr);
+        
+        
+        
+        // Invoke the saver
+        if (restorer->Invoke() != kTfLiteOk) {
+            ErrorMessage(m_logger) << "Failed to invoke restore signature runner" << std::endl;
+            return;
+        }
+        
+        InfoMessage(m_logger)<<"Restorer invoked successfully"<<std::endl;
     }
-    
 };
 
 void InitTensorflowModel(
