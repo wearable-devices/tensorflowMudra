@@ -1,6 +1,5 @@
 /* Wearable Devices - Tensorflow library */
 
-
 #include <cstdlib>
 #include <unordered_set>
 #include <string>
@@ -14,6 +13,9 @@
 #include "tensorflow/lite/string_util.h"
 #include "tensorflow/lite/mutable_op_resolver.h"
 #include "tensorflow/lite/delegates/coreml/coreml_delegate.h"
+#include "tensorflow/lite/core/c/c_api_types.h"
+#include "tensorflow/lite/core/c/common.h"
+
 //#include "tensorflow/lite/delegates/flex/delegate.h"
 
 using namespace std;
@@ -26,16 +28,16 @@ map<const char*, unique_ptr<ComputationalModel>> g_model;
 
 class ComputationalModel
 {
-	// Logging
-	shared_ptr<Logger> m_logger;
+    // Logging
+    shared_ptr<Logger> m_logger;
 
-	std::unique_ptr<tflite::FlatBufferModel> m_model;
-	std::unique_ptr<tflite::Interpreter> m_interpreter;
+    std::unique_ptr<tflite::FlatBufferModel> m_model;
+    std::unique_ptr<tflite::Interpreter> m_interpreter;
 
     TfLiteDelegate* m_coreMl_delegate;
     string m_WeightsFileName;
     vector<int> m_outputSizes;
-
+    int batches;
     void InitInterpreter(const char* modelFileName, int num_threads) {
         // Load the model
         m_model = tflite::FlatBufferModel::BuildFromFile(modelFileName);
@@ -108,9 +110,11 @@ class ComputationalModel
     }
     
     void InitRunnerInputsWithLabels(tflite::impl::SignatureRunner* runner, const map<string, vector<int>>& inputDims) {
+       
         for (const auto& input : inputDims) {
+
             if (runner->ResizeInputTensor(input.first.c_str(), input.second) != kTfLiteOk) {
-                ErrorMessage(m_logger) << "Failed to resize input tensor";
+                ErrorMessage(m_logger) << "Failed to resize input tensor with name ";
                 return;
             }
             
@@ -145,19 +149,15 @@ class ComputationalModel
         return runner;
     }
 
-
-    
-
 public:
-
-	ComputationalModel(
-		const char* modelFileName,
-		const vector<vector<int>> & inputDims,
-		int num_threads,
-		int loggerSeverity,
+    ComputationalModel(
+        const char* modelFileName,
+        const vector<vector<int>> & inputDims,
+        int num_threads,
+        int loggerSeverity,
         int coreMLVersion) :
-		m_logger(make_shared<Logger>("Mudra", (Logger::Severity)loggerSeverity))
-	{
+        m_logger(make_shared<Logger>("Mudra", (Logger::Severity)loggerSeverity))
+    {
         DebugMessage(m_logger) << "\nStart TensorFlow 2.16 with coreML support init function on " << modelFileName;
         DebugMessage(m_logger) << "\nnumOfThreads = " << num_threads;
         DebugMessage(m_logger) << "\ncoreMLVersion = " << coreMLVersion;
@@ -167,19 +167,18 @@ public:
         InitInputs(inputDims);
         AllocateTensors();
 
-		m_outputSizes.resize(m_interpreter->outputs().size());
-		DebugMessage(m_logger) << "\nModel outputSizes " << m_interpreter->outputs().size() << ":";
-		for (unsigned i = 0; i < m_interpreter->outputs().size(); i++)
-		{
-			m_outputSizes[i] = m_interpreter->tensor(m_interpreter->outputs()[i])->bytes / sizeof(float);
-			DebugMessage(m_logger) << ", " << m_outputSizes[i];
-		}
-	}
+        m_outputSizes.resize(m_interpreter->outputs().size());
+        DebugMessage(m_logger) << "\nModel outputSizes " << m_interpreter->outputs().size() << ":";
+        for (unsigned i = 0; i < m_interpreter->outputs().size(); i++)
+        {
+            m_outputSizes[i] = m_interpreter->tensor(m_interpreter->outputs()[i])->bytes / sizeof(float);
+            DebugMessage(m_logger) << ", " << m_outputSizes[i];
+        }
+    }
     
     ComputationalModel(
         const char* modelFileName,
         const char* weightsFileName,
-        const map<string, vector<int>>& inputDims,
         int num_threads,
         int loggerSeverity) :
         m_logger(make_shared<Logger>("Mudra", (Logger::Severity)loggerSeverity))
@@ -190,16 +189,15 @@ public:
 
         InitInterpreter(modelFileName, num_threads);
         Restore();
-        tflite::impl::SignatureRunner* runner = GetRunner("train");
-        InitRunnerInputsWithLabels(runner, inputDims);
         AllocateTensors();
+        
     }
     
     ~ComputationalModel() {
         TfLiteCoreMlDelegateDelete(m_coreMl_delegate);
     }
 
-	void Run(const vector<vector<float>>& inputs, std::vector<std::vector<float>>& outputs)
+    void Run(const vector<vector<float>>& inputs, std::vector<std::vector<float>>& outputs)
     {
         DebugMessage(m_logger) << "\nRun time input size " << inputs.size() << ":";
         
@@ -231,139 +229,181 @@ public:
             DebugMessage(m_logger) << "outputs[" << i << "]=" << outputs[i].size();
         }
     }
-    
-	void Train(const map<string, vector<float>>& inputs)
-	{
-        DebugMessage(m_logger) << "\nTrain" << inputs.size() << ":";
 
-        tflite::impl::SignatureRunner* runner = GetRunner("train");
-        
-		// Prepare input tensors
-		for (const auto& input : inputs) {
-            DebugMessage(m_logger) << "\nCopying " << input.first;
-			TfLiteTensor* input_tensor = runner->input_tensor(input.first.c_str());
-			std::copy(input.second.begin(), input.second.end(), input_tensor->data.f);
-		}
+    template<typename T>
+    void CopyDataToTensor(TfLiteTensor* input_tensor,
+                                              const vector<T>& input_data) {
+      switch (input_tensor->type) {
+        case kTfLiteFloat32: {
+          float* dest = input_tensor->data.f;
+          for (size_t i = 0; i < input_data.size(); i++) {
+            dest[i] = static_cast<float>(input_data[i]);
+          }
+          break;
+        }
 
-		// Invoke the runner
-		if (runner->Invoke() != kTfLiteOk) {
+        case kTfLiteInt32: {
+          int32_t* dest = input_tensor->data.i32;
+          for (size_t i = 0; i < input_data.size(); i++) {
+            dest[i] = static_cast<int32_t>(input_data[i]);
+          }
+          break;
+        }
+
+        case kTfLiteUInt8: {
+          uint8_t* dest = input_tensor->data.uint8;
+          for (size_t i = 0; i < input_data.size(); i++) {
+            dest[i] = static_cast<uint8_t>(input_data[i]);
+          }
+          break;
+        }
+
+        case kTfLiteInt8: {
+          int8_t* dest = input_tensor->data.int8;
+          for (size_t i = 0; i < input_data.size(); i++) {
+            dest[i] = static_cast<int8_t>(input_data[i]);
+          }
+          break;
+        }
+
+        case kTfLiteInt64: {
+          int64_t* dest = input_tensor->data.i64;
+          for (size_t i = 0; i < input_data.size(); i++) {
+            dest[i] = static_cast<int64_t>(input_data[i]);
+          }
+          break;
+        }
+
+        case kTfLiteBool: {
+          bool* dest = input_tensor->data.b;
+          for (size_t i = 0; i < input_data.size(); i++) {
+            dest[i] = static_cast<bool>(input_data[i]);
+          }
+          break;
+        }
+
+        case kTfLiteInt16: {
+          int16_t* dest = input_tensor->data.i16;
+          for (size_t i = 0; i < input_data.size(); i++) {
+            dest[i] = static_cast<int16_t>(input_data[i]);
+          }
+          break;
+        }
+
+        case kTfLiteFloat64: {
+          double* dest = input_tensor->data.f64;
+          for (size_t i = 0; i < input_data.size(); i++) {
+            dest[i] = static_cast<double>(input_data[i]);
+          }
+          break;
+        }
+
+        case kTfLiteUInt16: {
+          uint16_t* dest = input_tensor->data.ui16;
+          for (size_t i = 0; i < input_data.size(); i++) {
+            dest[i] = static_cast<uint16_t>(input_data[i]);
+          }
+          break;
+        }
+
+        case kTfLiteResource:
+        case kTfLiteVariant:
+          ErrorMessage(m_logger)
+              << "Unsupported tensor type: " << input_tensor->type;
+          break;
+
+        default:
+          ErrorMessage(m_logger)
+              << "Unknown tensor type: " << input_tensor->type;
+          break;
+      }
+    }
+
+    template<typename T>
+    vector<void*> InvokeSignatureRunner(const char* name, const map<string, vector<int>>& inputDims,const map<string, vector<T>>& inputs, const vector<string>& outputNames){
+       
+        tflite::impl::SignatureRunner* runner = GetRunner(name);
+        InitRunnerInputsWithLabels(runner,inputDims);
+        for (const auto& input : inputs) {
+            TfLiteTensor* input_tensor = runner->input_tensor(input.first.c_str());
+
+            // Prepare input tensors
+            CopyDataToTensor(input_tensor, input.second);
+        }
+        // Invoke the runner
+        if (runner->Invoke() != kTfLiteOk) {
             ErrorMessage(m_logger) << "\nInvoke failed";
-		} else{
+        } else{
             DebugMessage(m_logger) << "\nInvoke successfully";
         }
 
-//		const TfLiteTensor* output_tensor = runner->output_tensor(0);  // TODO: Confirm output tensor index/name with Leeor
-		//std::vector<float> loss =  output_tensor;
-		//std::cout << "Loss: " << loss << std::endl;
+        vector<void*> outputs;
+        for (const auto& outputName : outputNames) {
+            outputs.push_back(runner->output_tensor(outputName.c_str())->data.data);
+        }
+        return outputs;
+    }
 
-		// TODO: Implement SaveWeights function and call it here
-		// SaveWeights(output);
-        // Retrieve and process the output tensor
-        const TfLiteTensor* output_tensor = runner->output_tensor("loss");
+    vector<void*> InvokeSignatureRunner(const char* name, const map<string, vector<int>>& inputDims, const map<string, vector<string>>& inputs, const vector<string>& outputNames) 
+    {
+        tflite::impl::SignatureRunner* runner = GetRunner(name);
+        InitRunnerInputsWithLabels(runner, inputDims);
 
-        // Assuming the output tensor is of size [4 * dimensions * 1]
-        float* output_data = output_tensor->data.f;
-        int batch_size = 4; // The first dimension
-        int dim = 18; // The second dimension
-        int channels = 1; // The third dimension
-
-        std::vector<std::vector<std::vector<float>>> output(batch_size, std::vector<std::vector<float>>(dim, std::vector<float>(channels)));
-
-        for (int i = 0; i < batch_size; ++i) {
-            for (int j = 0; j < dim; ++j) {
-                output[i][j][0] = output_data[i * dim + j];
+        // Prepare input tensors
+        for (const auto& input : inputs) {
+            TfLiteTensor* input_tensor = runner->input_tensor(input.first.c_str());
+            
+            tflite::DynamicBuffer buffer;
+            for (int i = 0; i < input.second.size(); i++) {
+                buffer.AddString(input.second[i].c_str(), input.second[i].size());
             }
+            buffer.WriteToTensor(input_tensor, /*new_shape=*/nullptr);
         }
 
-        // Logging or using the output
-        for (int i = 0; i < batch_size; ++i) {
-            for (int j = 0; j < dim; ++j) {
-                DebugMessage(m_logger) << "output[" << i << "][" << j << "][0]: " << output[i][j][0];
-            }
+        // Invoke the runner
+        if (runner->Invoke() != kTfLiteOk) {
+            ErrorMessage(m_logger) << "\nInvoke failed";
+        } else {
+            DebugMessage(m_logger) << "\nInvoke successfully";
         }
-        
+
+        vector<void*> outputs;
+        for (const auto& outputName : outputNames) {
+            outputs.push_back(runner->output_tensor(outputName.c_str())->data.data);
+        }
+        return outputs;
+    }
+    
+    void Train(const map<string, vector<float>>& inputs,const map<string, vector<int>>& inputDims)
+    {
+
+
+       vector<void*> loss = InvokeSignatureRunner<float>("train",inputDims,inputs,{"loss"});
+     
+        float* floatLoss = (float*) loss[0];
+        DebugMessage(m_logger) << "output: " << floatLoss[0];
+      
         Save();
-	}
+    }
 
     void Save()
     {
+        InvokeSignatureRunner("save", {{"checkpoint_path",{1}}}, {{"checkpoint_path",{m_WeightsFileName}}}, {});
         // Get the signature runner for 'save'
-        auto* saver = m_interpreter->GetSignatureRunner("save");
-        if (!saver) {
-            ErrorMessage(m_logger) << "Failed to get signature runner for 'save'" << std::endl;
-            return;
-        }
-        
-        if (saver->ResizeInputTensor("checkpoint_path", {1}) != kTfLiteOk) {
-            ErrorMessage(m_logger) << "Failed to resize input tensor for save operation";
-            return;
-        }
-        if (saver->AllocateTensors() != kTfLiteOk) {
-            ErrorMessage(m_logger) << "Failed to allocate tensors for save operation";
-            return;
-        }
-        TfLiteTensor* input_tensor = saver->input_tensor("checkpoint_path");
-        if (!input_tensor) {
-            ErrorMessage(m_logger) << "Failed to get input tensor for save operation";
-            return;
-        }
-        tflite::DynamicBuffer buffer;
-        buffer.AddString(m_WeightsFileName.c_str(), m_WeightsFileName.size());
-        buffer.WriteToTensor(input_tensor, /*new_shape=*/nullptr);
-         
-
        
-        // Invoke the saver
-        if (saver->Invoke() != kTfLiteOk) {
-            ErrorMessage(m_logger) << "Failed to invoke save signature runner" << std::endl;
-            return;
-        }
-        ErrorMessage(m_logger) << "Saved new weights!" << std::endl;
-
     }
 
-
     void Restore() {
-        auto* restorer = m_interpreter->GetSignatureRunner("restore");
-        if (!restorer) {
-            ErrorMessage(m_logger) << "Failed to get signature runner for 'restore'" << std::endl;
-            return;
-        }
-        
-        if (restorer->ResizeInputTensor("checkpoint_path", {1}) != kTfLiteOk) {
-            ErrorMessage(m_logger) << "Failed to resize input tensor for restore operation";
-            return;
-        }
-        if (restorer->AllocateTensors() != kTfLiteOk) {
-            ErrorMessage(m_logger) << "Failed to allocate tensors for restore operation";
-            return;
-        }
-        TfLiteTensor* input_tensor = restorer->input_tensor("checkpoint_path");
-        if (!input_tensor) {
-            ErrorMessage(m_logger) << "Failed to get input tensor for restore operation";
-            return;
-        }
-        tflite::DynamicBuffer buffer;
-        buffer.AddString(m_WeightsFileName.c_str(), m_WeightsFileName.size());
-        buffer.WriteToTensor(input_tensor, /*new_shape=*/nullptr);
-        
-        
-        
-        // Invoke the saver
-        if (restorer->Invoke() != kTfLiteOk) {
-            ErrorMessage(m_logger) << "Failed to invoke restore signature runner" << std::endl;
-            return;
-        }
-        
-        InfoMessage(m_logger)<<"Restorer invoked successfully"<<std::endl;
+
+        InvokeSignatureRunner("restore", {{"checkpoint_path",{1}}}, {{"checkpoint_path",{m_WeightsFileName}}}, {});
     }
 };
 
 void InitTensorflowModel(
-	const char* modelFileName,
-	const vector<vector<int>>& inputDims,
-	int loggerSeverity,
-	int numOfThreads,
+    const char* modelFileName,
+    const vector<vector<int>>& inputDims,
+    int loggerSeverity,
+    int numOfThreads,
     int coreMLVersion)
 {
     g_model[modelFileName] = make_unique<ComputationalModel>(modelFileName, inputDims, numOfThreads, loggerSeverity, coreMLVersion);
@@ -372,13 +412,11 @@ void InitTensorflowModel(
 void InitTensorflowTrainingModel(
     const char* modelFileName,
     const char* weightsFileName,
-    const map<string, vector<int>>& inputDims,
     int loggerSeverity,
     int numOfThreads)
 {
-    g_model[modelFileName] = make_unique<ComputationalModel>(modelFileName, weightsFileName, inputDims, numOfThreads, loggerSeverity);
+    g_model[modelFileName] = make_unique<ComputationalModel>(modelFileName, weightsFileName, numOfThreads, loggerSeverity);
 }
-
 
 //Rough implementation of training model until We know sizes
 
@@ -395,10 +433,10 @@ void DeleteTensorflowModel(const char* graphFileName)
     g_model[graphFileName].reset();
 }
 
-
 void TrainTensorflowModel(
-                          const char* modelFileName,
-                          const map<string, vector<float>>& inputs)
+    const char* modelFileName,
+    const map<string, vector<int>>& inputDims,
+    const map<string, vector<float>>& inputs)
 {
-    g_model[modelFileName]->Train(inputs);
+    g_model[modelFileName]->Train(inputs,inputDims);
 }
