@@ -237,7 +237,7 @@ public:
         case kTfLiteFloat32: {
           float* dest = input_tensor->data.f;
           for (size_t i = 0; i < input_data.size(); i++) {
-            dest[i] = static_cast<float>(input_data[i]);
+            dest[i] = input_data[i];
           }
           break;
         }
@@ -245,7 +245,7 @@ public:
         case kTfLiteInt32: {
           int32_t* dest = input_tensor->data.i32;
           for (size_t i = 0; i < input_data.size(); i++) {
-            dest[i] = static_cast<int32_t>(input_data[i]);
+            dest[i] = input_data[i];
           }
           break;
         }
@@ -253,7 +253,7 @@ public:
         case kTfLiteUInt8: {
           uint8_t* dest = input_tensor->data.uint8;
           for (size_t i = 0; i < input_data.size(); i++) {
-            dest[i] = static_cast<uint8_t>(input_data[i]);
+            dest[i] = input_data[i];
           }
           break;
         }
@@ -261,7 +261,7 @@ public:
         case kTfLiteInt8: {
           int8_t* dest = input_tensor->data.int8;
           for (size_t i = 0; i < input_data.size(); i++) {
-            dest[i] = static_cast<int8_t>(input_data[i]);
+            dest[i] = input_data[i];
           }
           break;
         }
@@ -269,7 +269,7 @@ public:
         case kTfLiteInt64: {
           int64_t* dest = input_tensor->data.i64;
           for (size_t i = 0; i < input_data.size(); i++) {
-            dest[i] = static_cast<int64_t>(input_data[i]);
+            dest[i] = input_data[i];
           }
           break;
         }
@@ -277,7 +277,7 @@ public:
         case kTfLiteBool: {
           bool* dest = input_tensor->data.b;
           for (size_t i = 0; i < input_data.size(); i++) {
-            dest[i] = static_cast<bool>(input_data[i]);
+            dest[i] = input_data[i];
           }
           break;
         }
@@ -285,7 +285,7 @@ public:
         case kTfLiteInt16: {
           int16_t* dest = input_tensor->data.i16;
           for (size_t i = 0; i < input_data.size(); i++) {
-            dest[i] = static_cast<int16_t>(input_data[i]);
+            dest[i] = input_data[i];
           }
           break;
         }
@@ -293,7 +293,7 @@ public:
         case kTfLiteFloat64: {
           double* dest = input_tensor->data.f64;
           for (size_t i = 0; i < input_data.size(); i++) {
-            dest[i] = static_cast<double>(input_data[i]);
+            dest[i] = input_data[i];
           }
           break;
         }
@@ -301,7 +301,7 @@ public:
         case kTfLiteUInt16: {
           uint16_t* dest = input_tensor->data.ui16;
           for (size_t i = 0; i < input_data.size(); i++) {
-            dest[i] = static_cast<uint16_t>(input_data[i]);
+            dest[i] = input_data[i];
           }
           break;
         }
