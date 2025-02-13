@@ -33,5 +33,11 @@ extern "C" void DeleteTensorflowModel(const char* graphFileName);
 extern "C" void TrainTensorflowModel(
     const char* modelFileName,
     const map<string, vector<int>>& inputDims,
-    const map<string, vector<float>>& inputs);
+    const map<string, vector<float>>& inputs,
+    float &lossOutput);
         
+extern "C" void RunTensorflowTrainingModel(
+    const char* modelFileName,
+    const map<string, vector<int>>& inputDims,
+    const map<string, vector<float>>& inputs,
+    map<string, vector<float>>& outputs);

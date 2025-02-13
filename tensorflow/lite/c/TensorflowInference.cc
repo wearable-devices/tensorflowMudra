@@ -183,7 +183,7 @@ public:
         int loggerSeverity) :
         m_logger(make_shared<Logger>("Mudra", (Logger::Severity)loggerSeverity))
     {
-        DebugMessage(m_logger) << "\nStart TensorFlow 2.16 with on device training support init function on " << modelFileName << ", weights file : " << weightsFileName;
+        DebugMessage(m_logger) << "\nStart TensorFlow 2.16 with on device training, model file: " << modelFileName << ", weights file : " << weightsFileName;
         DebugMessage(m_logger) << "\nnumOfThreads = " << num_threads;
         m_WeightsFileName = weightsFileName;
 
@@ -320,8 +320,8 @@ public:
     }
 
     template<typename T>
-    vector<void*> InvokeSignatureRunner(const char* name, const map<string, vector<int>>& inputDims,const map<string, vector<T>>& inputs, const vector<string>& outputNames){
-       
+    void InvokeSignatureRunner(const char* name, const map<string, vector<int>>& inputDims, const map<string, vector<T>>& inputs, map<string, vector<T>>& outputs)
+    {
         tflite::impl::SignatureRunner* runner = GetRunner(name);
         InitRunnerInputsWithLabels(runner,inputDims);
         for (const auto& input : inputs) {
@@ -337,11 +337,40 @@ public:
             DebugMessage(m_logger) << "\nInvoke successfully";
         }
 
-        vector<void*> outputs;
-        for (const auto& outputName : outputNames) {
-            outputs.push_back(runner->output_tensor(outputName.c_str())->data.data);
+        // Process outputs
+        for (auto& output_pair : outputs) {
+            const string& output_name = output_pair.first;
+            const TfLiteTensor* tensor = runner->output_tensor(output_name.c_str());
+            
+            ErrorMessage(m_logger) << "tensor output" << output_name;
+            if (tensor) {
+                // Calculate the number of elements based on tensor dimensions
+                int num_elements = 1;
+                for (int i = 0; i < tensor->dims->size; i++) {
+                    num_elements *= tensor->dims->data[i];
+                }
+                
+                ErrorMessage(m_logger) << "number of elements = " << num_elements;
+
+                // Get tensor data
+                T* tensor_data = nullptr;
+                
+                // Handle different types appropriately
+                if constexpr (std::is_same<T, float>::value) {
+                    tensor_data = reinterpret_cast<T*>(tensor->data.f);
+                } else if constexpr (std::is_same<T, int>::value) {
+                    tensor_data = reinterpret_cast<T*>(tensor->data.i32);
+                }
+                
+                if (tensor_data) {
+                    // Resize and copy data to the output vector
+                    output_pair.second.resize(num_elements);
+                    std::copy(tensor_data, tensor_data + num_elements, output_pair.second.begin());
+                    
+                    ErrorMessage(m_logger) << "copying data";
+                }
+            }
         }
-        return outputs;
     }
 
     vector<void*> InvokeSignatureRunner(const char* name, const map<string, vector<int>>& inputDims, const map<string, vector<string>>& inputs, const vector<string>& outputNames) 
@@ -374,16 +403,23 @@ public:
         return outputs;
     }
     
-    void Train(const map<string, vector<float>>& inputs,const map<string, vector<int>>& inputDims)
+    void Train(const map<string, vector<float>>& inputs,const map<string, vector<int>>& inputDims, float &lossOutput)
     {
-
-
-       vector<void*> loss = InvokeSignatureRunner<float>("train",inputDims,inputs,{"loss"});
+        map<string, vector<float>> outputs = {{"loss", {}}};
+        InvokeSignatureRunner<float>("train",inputDims,inputs, outputs);
      
-        float* floatLoss = (float*) loss[0];
-        DebugMessage(m_logger) << "output: " << floatLoss[0];
-      
+        if (!outputs["loss"].empty()) {
+            DebugMessage(m_logger) << "Training loss: " << outputs["loss"][0];
+        }
+        
+        lossOutput = outputs["loss"][0];
+        
         Save();
+    }
+
+    void Run(const map<string, vector<float>>& inputs, const map<string, vector<int>>& inputDims, map<string, vector<float>>& outputs)
+    {
+        InvokeSignatureRunner<float>("infer", inputDims, inputs, outputs);
     }
 
     void Save()
@@ -436,7 +472,18 @@ void DeleteTensorflowModel(const char* graphFileName)
 void TrainTensorflowModel(
     const char* modelFileName,
     const map<string, vector<int>>& inputDims,
-    const map<string, vector<float>>& inputs)
+    const map<string, vector<float>>& inputs,
+    float &lossOutput)
 {
-    g_model[modelFileName]->Train(inputs,inputDims);
+    g_model[modelFileName]->Train(inputs, inputDims, lossOutput);
 }
+
+void RunTensorflowTrainingModel(
+    const char* modelFileName,
+    const map<string, vector<int>>& inputDims,
+    const map<string, vector<float>>& inputs,
+    map<string, vector<float>>& outputs)
+{
+    g_model[modelFileName]->Run(inputs,inputDims, outputs);
+}
+ 
