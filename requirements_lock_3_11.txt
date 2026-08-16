@@ -392,9 +392,9 @@ scipy==1.10.1 \
     # via
     #   -r ./requirements.in
     #   jax
-setuptools==67.6.1 \
-    --hash=sha256:257de92a9d50a60b8e22abfcbb771571fde0dbf3ec234463212027a4eeecbe9a \
-    --hash=sha256:e728ca814a823bf7bf60162daf9db95b93d532948c4c0bea762ce62f60189078
+setuptools==83.0.0 \
+    --hash=sha256:025bccbbf0fa05b6192bc64ae1e7b16e001fd6d6d4d5de03c97b1c1ade523bef \
+    --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3
     # via
     #   -r ./requirements.in
     #   tb-nightly
